@@ -11,6 +11,7 @@
 #define BOX_X 256
 #define BOX_Y 256
 FUNCTION uint32_t calc_target(uint32_t last_target, uint64_t time_a, uint64_t time_b) {
+	if (time_a == 0 || time_b == 0) return 1;
 	int32_t difference = (time_a - time_b);
 	if (difference > TARGET_TIME_SEC && last_target == 0) return 1;
 	return last_target + ((TARGET_TIME_SEC * 100) - (difference * 100));
