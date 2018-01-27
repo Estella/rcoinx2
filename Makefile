@@ -4,6 +4,10 @@ BASE := $(shell pwd)
 DEBUG ?= -DDEBUG
 LIBS := libcrypto.a
 CFLAGS += $(DEBUG)
+SYSLIBS =
+ifeq ($(WINDIR),)
+	SYSLIBS = -lpthread
+endif
 all: rcoind
 
 include crypto/crypto.mk
@@ -11,7 +15,7 @@ include crypto/crypto.mk
 RCOIN_FILES := $(wildcard src/*.c)
 
 rcoind: $(RCOIN_FILES:.c=.o) $(LIBS) Makefile
-	$(CC) $(LDFLAGS) -o rcoind $(RCOIN_FILES:.c=.o) $(LIBS)
+	$(CC) $(LDFLAGS) -o rcoind $(RCOIN_FILES:.c=.o) $(LIBS) $(SYSLIBS)
 
 src/%.o: src/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<

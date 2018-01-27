@@ -31,6 +31,7 @@ FUNCTION int verify_work(uint8_t *hash, uint32_t target) {
 	)
 	return bignum_cmp(&d, &b) == LARGER;
 }
+// TODO: multithreading
 FUNCTION void proof_of_work(struct block* orig_block, int *cancel_flag, uint32_t target, int *hashespersec) {
 	memset(orig_block->hash, 0, 64);
 	orig_block->nonce = 1;
