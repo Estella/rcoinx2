@@ -5,6 +5,7 @@
 #include <string.h>
 #include "debug.h"
 #include <errno.h>
+#include "base32.h"
 #ifndef WIN32
 	#include <sys/stat.h>
 #endif
@@ -32,6 +33,24 @@ FUNCTION void read_block(int is_main_chain, uint64_t id, struct block *block) {
 	}
 	fread(block, 1, sizeof(struct block), f);
 	fclose(f);
+}
+uint64_t get_balance_for_address(uint8_t* public) {
+	struct block b; char basebuf[64];
+	base32_encode(public, 32, basebuf, 64);
+	if (map_has(balance_cache, basebuf)) return map_get(balance_cache, basebuf);
+	uint64_t ret = 0;
+	for (int i = 0; i < get_height(); i++) {
+		read_block(1, i, &b);
+		for (int t = 0; t < b.num_tx; t++) {
+			if (!memcmp(b.transactions[t].body.to, public, 32)) {
+				ret += b.transactions[t].body.amount;
+			}
+			if (!memcmp(b.transactions[t].body.from, public, 32)) {
+				ret -= b.transactions[t].body.amount;
+			}
+		}
+	}
+	return ret;
 }
 static void update_blockchain_difficulty(int is_main_chain, uint32_t difficulty) {
 	char path[256];
@@ -81,6 +100,7 @@ static uint64_t get_blockchain_length(int is_main_chain) {
 }
 FUNCTION void init_blockchain() {
 	char path[256];
+	memcpy(genesis_block.transactions[0].body.to, __GENESIS_BLOCK__(), 32);
 	snprintf(path, 256, "%s/%s", get_options()->datadir, "blockchain");
 	IF_DEBUG(printf("Blockchain path: %s\n", path));
 	if (mkdir(path, 0755) != 0);

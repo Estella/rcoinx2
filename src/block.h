@@ -27,6 +27,12 @@ struct block {
 	struct tx transactions[TX_PER_BLOCK];
 };
 /* This is important */
+#include "base32.h"
+static inline char* __GENESIS_BLOCK__() {
+	static char buf[32];
+	base32_decode("LTE5JRYOCLSZKZ2XL6ZXGBNLI3CTN537FS2PAO7IMUV6WT7N4QRQ", buf, 32);
+	return buf;
+}
 static struct block genesis_block = {
 	.hash = {0},
 	.lasthash = {0},
@@ -34,7 +40,7 @@ static struct block genesis_block = {
 	.nonce = 0,
 	.timestamp = 1517070928,
 	.transactions = {
-		{ {0}, {1517070928, {0}, {0}, 2500000000000, 0, {0}} }
+		{ {0}, {1517070928, {0}, {0}, 2500000000000ULL, 0, {0}} }
 	}
 };
 

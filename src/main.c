@@ -9,6 +9,7 @@
 #include "debug.h"
 static char datadir[256];
 static thrd_t rpcserver;
+struct map_t* balance_cache;
 static struct options my_opts = {
 	.port = 12991,
 	.allow_all = 0
@@ -22,6 +23,7 @@ struct options* get_options() {
 	return &my_opts;
 }
 int main(int argc, char **argv) {
+	balance_cache = new_map();
 	if (argc == 2 && (argv[1][1] == 'h' || argv[1][2] == 'h')) {
 		printf("RCOINX/2.0 Block size = %d, transaction size = %d\n", sizeof(struct block), sizeof(struct tx));
 		printf("Usage: rcoind [--option=value]...\n");

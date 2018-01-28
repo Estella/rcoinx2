@@ -1,6 +1,7 @@
 #pragma once
 #include <stdio.h>
 #include <stdint.h>
+#include "map.h"
 struct options {
 	char *datadir;
 	int allow_all;
@@ -35,3 +36,4 @@ static inline uint32_t get_difficulty(int mainchain) {
 	read_block(mainchain, height - 2, &b);
 	return calc_target(mainchain ? last_difficulty : last_alt_difficulty, a.timestamp, b.timestamp);
 }
+extern struct map_t* balance_cache;

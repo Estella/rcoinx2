@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <stdarg.h>
 enum { JSON_END = 0, JSON_OBJ, JSON_INT, JSON_INT64, JSON_UINT, JSON_UINT64, JSON_FLOAT, JSON_STR };
-static const char* fmtstrs[] = { "", "%s", "%d", "%lld", "%u", "%llu", "%.5g", "\"%s\"" };
+static const char* fmtstrs[] = { "", "%s", "%d", "%lld", "%u", "%llu", "%.6f", "\"%s\"" };
 static int easy_json_encode(char *out, int outlen, ...) {
 	va_list va;
 	va_start(va, outlen);
