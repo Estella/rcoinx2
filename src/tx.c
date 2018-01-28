@@ -1,6 +1,6 @@
 #include "block.h"
 #include "chain.h"
-
+#include "tx.h"
 int verify_transaction_standalone(struct tx* tx) {
 	return wallet_verify_transaction(tx->body.from, tx);
 }

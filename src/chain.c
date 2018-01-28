@@ -40,6 +40,7 @@ FUNCTION void read_block(int is_main_chain, uint64_t id, struct block *block) {
 	locked = 1;
 	if(sqlite3_exec(db, statement, _internal_rdb, block, NULL)) log_fatal("Failed to read block %d.", id);
 	locked = 0;
+
 }
 int transaction_spent(uint8_t* signature) {
 	char sigbuf[128];
@@ -56,23 +57,27 @@ int transaction_spent(uint8_t* signature) {
 	return map_has(transaction_cache, sigbuf);*/
 	return 0;
 }
+struct __internal_state_gbfa {
+	char *myaddr;
+	uint64_t* ret;
+};
+int _internal_gbfa(void *ptr, int argc, char **argv, char **colnames) {
+	struct __internal_state_gbfa* state = ptr;
+	if (argc != 3) log_fatal("Assertion failure " __FILE__);
+	IF_DEBUG(printf("%s %s\n", argv[1], argv[2]));
+	if (!strcmp(argv[1], state->myaddr))
+		*state->ret -= atoll(argv[0]);
+	else
+		*state->ret += atoll(argv[0]);
+	return 0;
+}
 uint64_t get_balance_for_address(uint8_t* public) {
-	struct block b; char basebuf[64];
+	struct block b; char basebuf[64]; uint64_t ret = 0;
 	base32_encode(public, 32, basebuf, 64);
-	if (map_has(balance_cache, basebuf)) return map_get(balance_cache, basebuf);
-	uint64_t ret = 0;
-	for (int i = 0; i < get_height(); i++) {
-		read_block(1, i, &b);
-		for (int t = 0; t < b.num_tx; t++) {
-			if (!memcmp(b.transactions[t].body.to, public, 32)) {
-				ret += b.transactions[t].body.amount;
-			}
-			if (!memcmp(b.transactions[t].body.from, public, 32)) {
-				ret -= b.transactions[t].body.amount;
-			}
-		}
-	}
-	map_set(balance_cache, basebuf, ret);
+	char statement[384];
+	struct __internal_state_gbfa state = {basebuf, &ret};
+	sprintf(statement, "SELECT amount, xfrom, xto FROM txcache WHERE xfrom = '%s' or xto = '%s';", basebuf, basebuf);
+	if(sqlite3_exec(db, statement, _internal_gbfa, &state, NULL)) { IF_DEBUG(puts(sqlite3_errmsg(db))); }
 	return ret;
 }
 static void update_blockchain_difficulty(int is_main_chain, uint32_t difficulty) {
@@ -105,12 +110,19 @@ static uint64_t get_blockchain_length(int is_main_chain) {
 	sqlite3_exec(db, statement, _internal_gbcl, &length, NULL);
 	return length + 1;
 }
+#define A(a) if(a) log_fatal(sqlite3_errmsg(db));
 void setup_blockchain() {
-	sqlite3_exec(db, "CREATE TABLE blocks (id int, data string, hash string, lasthash string, mainchain int);", NULL, NULL, NULL);
-	sqlite3_exec(db, "CREATE TABLE balances (balance int, address string);", NULL, NULL, NULL);
-	sqlite3_exec(db, "CREATE TABLE txcache (signature string);", NULL, NULL, NULL);
-	sqlite3_exec(db, "CREATE TABLE misc (key string, valueint int, valuestr string);", NULL, NULL, NULL);
+	A(sqlite3_exec(db, "CREATE TABLE blocks (id int, data string, hash string, lasthash string, mainchain int);", NULL, NULL, NULL));
+	A(sqlite3_exec(db, "CREATE TABLE balances (balance int, address string);", NULL, NULL, NULL));
+	A(sqlite3_exec(db, "CREATE TABLE txcache (blockid int, mainchain int, signature string, xfrom string, xto string, amount int);", NULL, NULL, NULL));
+	A(sqlite3_exec(db, "CREATE TABLE misc (key string, valueint int, valuestr string);", NULL, NULL, NULL));
 	write_block(1, 0, &genesis_block);
+}
+void switch_chains() {
+	sqlite3_mutex_enter(sqlite3_db_mutex(db));
+	if(sqlite3_exec(db, "DELETE FROM blocks WHERE mainchain = 1; UPDATE blocks SET mainchain = 1 WHERE mainchain = 0;", NULL, NULL, NULL))
+		log_fatal("Failed to switch blockchains. The blockchain is now likely corrupt.");
+	sqlite3_mutex_leave(sqlite3_db_mutex(db));
 }
 FUNCTION void init_blockchain() {
 	char path[256]; int first_time = 0;
@@ -144,6 +156,18 @@ FUNCTION void write_block(int is_main_chain, uint64_t id, struct block *block) {
 	pos += sprintf(blockbuf + pos, "', '");
 	pos += base32_encode(block->lasthash, 64, blockbuf + pos, 256000 - pos);
 	pos += sprintf(blockbuf + pos, "');");
+	//sqlite3_exec(db, "CREATE TABLE txcache (blockid int, mainchain int, signature string, xfrom string, xto string, amount int);", NULL, NULL, NULL);
 	if (sqlite3_exec(db, blockbuf, NULL, NULL, NULL)) log_fatal("Failed to write block %lld to database.", id);
 	locked = 0;
+	char statement[1536];
+	for (int i = 0; i < block->num_tx; i++) {
+		int l = sprintf(statement, "insert or replace into txcache(mainchain, blockid, signature, xfrom, xto, amount) values(%d, %lld, '", is_main_chain, id);
+		l += base32_encode(block->transactions[i].signature, 64, statement + l, 1536);
+		l += sprintf(statement + l, "', '");
+		l += base32_encode(block->transactions[i].body.from, 32, statement +l, 1536);
+		l += sprintf(statement + l, "', '");
+		l += base32_encode(block->transactions[i].body.to, 32, statement + l, 1536);
+		l += sprintf(statement + l, "', %lld);", block->transactions[i].body.amount);
+		if (sqlite3_exec(db, statement, NULL, NULL, NULL)) log_fatal("Failed to write transaction cache: %s.", sqlite3_errmsg(db));
+	}
 }
