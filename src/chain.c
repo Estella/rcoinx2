@@ -82,7 +82,7 @@ uint64_t get_balance_for_address(uint8_t* public) {
 }
 static void update_blockchain_difficulty(int is_main_chain, uint32_t difficulty) {
 	char statement[256];
-	sprintf(statement, "insert or replace into misc (key, valueint) values('difficulty%d', %ld);", is_main_chain, difficulty);
+	sprintf(statement, "delete from misc where key = 'difficulty%d'; insert or replace into misc (key, valueint) values('difficulty%d', %ld);", is_main_chain, is_main_chain, difficulty);
 	if (sqlite3_exec(db, statement, NULL, NULL, NULL)) log_fatal("Failed to update blockchain difficulty");
 }
 int _internal_gbdf(void* ptr, int argc, char **argv, char **colnames) {
@@ -116,7 +116,6 @@ void setup_blockchain() {
 	A(sqlite3_exec(db, "CREATE TABLE balances (balance int, address string);", NULL, NULL, NULL));
 	A(sqlite3_exec(db, "CREATE TABLE txcache (blockid int, mainchain int, signature string, xfrom string, xto string, amount int);", NULL, NULL, NULL));
 	A(sqlite3_exec(db, "CREATE TABLE misc (key string, valueint int, valuestr string);", NULL, NULL, NULL));
-	write_block(1, 0, &genesis_block);
 }
 void switch_chains() {
 	sqlite3_mutex_enter(sqlite3_db_mutex(db));
@@ -135,6 +134,7 @@ FUNCTION void init_blockchain() {
 		else
 			first_time = 1;
 	if (first_time) setup_blockchain();
+	write_block(1, 0, &genesis_block);
 	_mainchain_length = get_blockchain_length(1);
 	_altchain_length = get_blockchain_length(0);
 	last_difficulty = get_blockchain_difficulty(1);
@@ -149,7 +149,9 @@ FUNCTION void write_block(int is_main_chain, uint64_t id, struct block *block) {
 	block_compress(block, compblock, osz);
 	while (locked);
 	locked = 1;
+	sqlite3_exec(db, "CREATE UNIQUE INDEX idx_blockhash ON blocks (hash);", NULL, NULL, NULL);
 	int pos = sprintf(blockbuf, "insert or replace into blocks(id, mainchain, data, hash, lasthash) values(%lld, %d, '", id, is_main_chain);
+	IF_DEBUG(printf("compressed size: %d\n", osz));
 	pos += base32_encode(compblock, osz, blockbuf + pos, 256000 - pos);
 	pos += sprintf(blockbuf + pos, "', '");
 	pos += base32_encode(block->hash, 64, blockbuf + pos, 256000 - pos);
@@ -160,6 +162,7 @@ FUNCTION void write_block(int is_main_chain, uint64_t id, struct block *block) {
 	if (sqlite3_exec(db, blockbuf, NULL, NULL, NULL)) log_fatal("Failed to write block %lld to database.", id);
 	locked = 0;
 	char statement[1536];
+	sqlite3_exec(db, "CREATE UNIQUE INDEX idx_txsig ON txcache (signature);", NULL, NULL, NULL);
 	for (int i = 0; i < block->num_tx; i++) {
 		int l = sprintf(statement, "insert or replace into txcache(mainchain, blockid, signature, xfrom, xto, amount) values(%d, %lld, '", is_main_chain, id);
 		l += base32_encode(block->transactions[i].signature, 64, statement + l, 1536);
