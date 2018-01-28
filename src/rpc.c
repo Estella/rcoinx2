@@ -29,12 +29,38 @@ void rpc_status(yhsRequest* req) {
 	yhs_begin_data_response(req, "application/json");
 	char data[2048];
 	easy_json_encode(data, 2048, JSON_STR, "status", "offline", JSON_INT, "difficulty", get_difficulty(1), JSON_UINT64, "height", get_height(), 0);
-	yhs_textf(req, "%s", data);
+	yhs_text(req, data);
+}
+void rpc_newwallet(yhsRequest *req) {
+	enforce_local();
+	yhs_begin_data_response(req, "application/json");
+	struct wallet w;
+	char basebuf[256]; char basebuf2[256];
+	new_wallet(&w);
+	base32_encode(w.private, 64, basebuf, 256);
+	base32_encode(w.public, 32, basebuf2, 256);
+	char data[2048];
+	easy_json_encode(data, 2048, JSON_STR, "private", basebuf, JSON_STR, "public", basebuf2, 0);
+	yhs_text(req, data);
+}
+void rpc_getbalance(yhsRequest *req) {
+	enforce_local();
+	if (!yhs_read_form_content(req)) return;
+	char *addr = yhs_find_control_value(req, "address");
+	if (!addr) return;
+	yhs_begin_data_response(req, "application/json");
+	char data[1024]; char pub[32];
+	base32_decode(addr, pub, 32);
+	easy_json_encode(data, 1024, JSON_UINT64, "balance", get_balance_for_address(pub), 0);
+	yhs_text(req, data);
 }
 FUNCTION void init_rpc_server(int port) {
 	printf("now listening on rpc port %d...\n", port);
+
 	yhsServer *s = yhs_new_server(port);
 	yhs_add_res_path_handler(s, "/status", &rpc_status, NULL);
+	yhs_set_valid_methods(YHS_METHOD_POST, yhs_add_res_path_handler(s, "/getbalance", &rpc_getbalance, NULL));
+	yhs_add_res_path_handler(s, "/wallet/new", &rpc_newwallet, NULL);
 	yhs_add_res_path_handler(s, "/getblocktemplate", &rpc_gettemplate, NULL);
 	while (1) yhs_update(s);
 }
@@ -59,12 +85,6 @@ FUNCTION void init_rpc_server(int port) {
 		return r;
 	}
 	if (!strcmp(request->pathDecoded, "/balance")) {
-		char data[2048]; char outbuf[32];
-		char *addr = strdupDecodeGETParam("address=", request, "LTE5JRYOCLSZKZ2XL6ZXGBNLI3CTN537FS2PAO7IMUV6WT7N4QRQ");
-		base32_decode(addr, outbuf, 32);
-		easy_json_encode(data, 2048, JSON_FLOAT, "balance", FLOATAMT(get_balance_for_address(outbuf)), 0);
-		free(addr);
-		return responseAllocJSON(data);
 	}
 	if (!strcmp(request->pathDecoded, "/wallet/new")) {
 		struct wallet w;

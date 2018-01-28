@@ -10,6 +10,10 @@
 static char datadir[256];
 static thrd_t rpcserver;
 struct map_t* balance_cache;
+struct cache_entry {
+	char address[64];
+	uint64_t value;
+};
 static struct options my_opts = {
 	.port = 12991,
 	.allow_all = 0

@@ -50,6 +50,7 @@ uint64_t get_balance_for_address(uint8_t* public) {
 			}
 		}
 	}
+	map_set(balance_cache, basebuf, ret);
 	return ret;
 }
 static void update_blockchain_difficulty(int is_main_chain, uint32_t difficulty) {
