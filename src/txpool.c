@@ -1,6 +1,5 @@
 #include "txpool.h"
-#include "map.h"
-
+#include "queue.h"
 void* transaction_pool;
 
 void init_txpool() {
@@ -14,3 +13,4 @@ void txpool_add(struct tx* transaction) {
 struct tx* txpool_get() {
 	return llqueue_poll(transaction_pool);
 }
+

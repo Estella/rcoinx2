@@ -7,6 +7,7 @@
 #include "main.h"
 #include "tinycthread.h"
 #include "debug.h"
+#include "log.h"
 static char datadir[256];
 static thrd_t rpcserver;
 struct map_t* balance_cache;
@@ -44,12 +45,11 @@ int main(int argc, char **argv) {
 	my_opts.datadir = defaultopt("datadir", datadir);
 	my_opts.port = atoi(defaultopt("port", "12991"));
 	mkdir(datadir, 0755);
-	printf("loading blockchain...\n");
+	log_info("Loading blockchain...");
 	init_blockchain();
-	printf("loaded blockchain...\n");
-	printf("loading rpc server...\n");
+	log_info("Loading RPC Server...");
 	thrd_create(&rpcserver, init_rpc_server, (void*)my_opts.port);
-	printf("loaded rpc server..\n");
+	log_info("Ready");
 	while (1) {
 		thrd_yield();
 	}
