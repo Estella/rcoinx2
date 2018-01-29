@@ -8,6 +8,7 @@
 #include "wallet.h"
 #include "main.h"
 #include <stdio.h>
+#include "txpool.h"
 #include <time.h>
 #include "easyjsonencode.h"
 #define enforce_local() if(!strstr(yhs_get_ip(req), "127.")&&!get_options()->allow_all) return
@@ -21,6 +22,8 @@ void rpc_gettemplate(yhsRequest *req) {
 	b.version = 0x01;
 	memcpy(b.lasthash, a.hash, 64);
 	b.timestamp = time(NULL);
+	b.num_tx = 1;
+	b.transactions[0] = COINBASE_TX;
 	// TODO pull transactions from pool
 	yhs_data(req, &b, sizeof(struct block));
 }
@@ -28,7 +31,7 @@ void rpc_status(yhsRequest* req) {
 	enforce_local();
 	yhs_begin_data_response(req, "application/json");
 	char data[2048];
-	easy_json_encode(data, 2048, JSON_STR, "status", "offline", JSON_INT, "difficulty", get_difficulty(1), JSON_UINT64, "height", get_height(), 0);
+	easy_json_encode(data, 2048, JSON_STR, "status", "offline", JSON_INT, "difficulty", get_difficulty(1), JSON_UINT64, "height", get_height(), JSON_UINT64, "reward", calc_reward(get_height()), JSON_INT, "txpool_size", txpool_size(), 0);
 	yhs_text(req, data);
 }
 void rpc_newwallet(yhsRequest *req) {

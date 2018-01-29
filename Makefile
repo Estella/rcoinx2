@@ -8,6 +8,9 @@ SYSLIBS =
 ifeq ($(WINDOWS),1)
 	WINDIR = /c/mingw
 endif
+ifeq ($(DEBUG),)
+	LDFLAGS += -s
+endif
 ifeq ($(WINDIR),)
 	SYSLIBS = -lpthread -ldl
 else
