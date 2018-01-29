@@ -1,6 +1,7 @@
 #pragma once
 #include <time.h>
 #include <string.h>
+#include <stdio.h>
 static inline char* _tstamp() {
 	static char myts[64];
 	time_t a;

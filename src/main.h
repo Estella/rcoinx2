@@ -1,7 +1,9 @@
 #pragma once
 #include <stdio.h>
 #include <stdint.h>
+static inline uint32_t get_difficulty(int mainchain);
 #include "map.h"
+#include "chain.h"
 struct options {
 	char *datadir;
 	int allow_all;
@@ -28,12 +30,17 @@ uint32_t last_difficulty, last_alt_difficulty;
 #include "block.h"
 #include "chain.h"
 #include "pow.h"
-static inline uint32_t get_difficulty(int mainchain) {
+static inline uint32_t __get_difficulty(int mainchain) {
 	if (get_height() < 3) return calc_target(0,0,0);
 	struct block a, b;
 	uint64_t height = mainchain ? get_height() : __get_alt_height();
 	read_block(mainchain, height - 1, &a);
 	read_block(mainchain, height - 2, &b);
 	return calc_target(mainchain ? last_difficulty : last_alt_difficulty, a.timestamp, b.timestamp);
+}
+static inline uint32_t get_difficulty(int mainchain) {
+	uint32_t diff = __get_difficulty(mainchain);
+	update_blockchain_difficulty(mainchain, diff);
+	return diff;
 }
 extern struct map_t* balance_cache;

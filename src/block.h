@@ -1,36 +1,28 @@
 #pragma once
 #pragma pack()
 #include <stdint.h>
-#define TX_PER_BLOCK 363
+#include <stdio.h>
+#include "block_def.h"
+#include "debug.h"
+#include "chain.h"
+#include "base32.h"
 #define FLOATAMT(a) (((double)a)/100000.0)
 #define INTAMT(a) (uint64_t)((a)*100000)
-struct tx_body {
-	uint64_t timestamp;
-	uint8_t from[32];
-	uint8_t to[32];
-	uint64_t amount;
-	uint8_t fee_percent;
-	uint8_t message[30];
-	uint16_t nonce;
-};
-struct tx {
-	uint8_t signature[64];
-	struct tx_body body;
-};
 #define COINBASE_TX ((struct tx){ \
 		{0}, {time(NULL), {0}, {0}, calc_reward(get_height()), \
 			0, "Coinbase transaction", 0}})
-struct block {
-	uint8_t version;
-	uint8_t hash[64];
-	uint8_t lasthash[64];
-	uint8_t num_tx;
-	uint32_t nonce;
-	uint64_t timestamp;
-	uint8_t reserved[51];
-	struct tx transactions[TX_PER_BLOCK];
-};
 /* This is important */
+IF_DEBUG(
+	static void print_block(struct block *b) {
+		char printstr[512];
+		int l = sprintf(printstr, "Block hash: ");
+		l += base32_encode(b->hash, 64, printstr + l, 128);
+		l += sprintf(printstr + l, "\nLast hash: ");
+		l += base32_encode(b->lasthash, 64, printstr + l, 128);
+		l += sprintf(printstr + l, "\nNum. TXs (including coinbase): %d\n", b->num_tx);
+		puts(printstr);
+	}
+)
 #include "base32.h"
 static inline char* __GENESIS_BLOCK__() {
 	static char buf[32];
@@ -54,4 +46,16 @@ static inline uint64_t calc_reward(uint64_t height) {
 		START_REWARD /= 2;
 	}
 	return START_REWARD;
+}
+#include "pow.h"
+#include "chain.h"
+#include "main.h"
+static inline int verify_block(struct block *b, int mainchain) {
+	if (!verify_work(b->hash, get_difficulty(mainchain))) { IF_DEBUG(printf("Failed to verify work\n")); return 0; }
+	struct block ob;
+	IF_DEBUG(printf("Block at %d\n", get_height() - 1));
+	read_block(1, get_height() - 1, &ob);
+	IF_DEBUG(print_block(&ob));
+	if (memcmp(b->lasthash, ob.hash, 64)) { IF_DEBUG(printf("Block chain out of order\n")); return 0; }
+	return b->transactions[0].body.amount <= calc_reward(mainchain ? get_height() : __get_alt_height());
 }

@@ -9,9 +9,11 @@ FUNCTION void new_wallet(struct wallet* wallet) {
 	ed25519_create_keypair(wallet->public, wallet->private, seed);
 }
 
-FUNCTION void wallet_sign_transaction(struct wallet* wallet, struct tx* transaction) {
+FUNCTION void wallet_sign_transaction(uint8_t* private, struct tx* transaction) {
 	memset(transaction->signature, '\0', 64);
-	ed25519_sign(transaction->signature, (void*)&transaction->body, sizeof(struct tx_body), wallet->public, wallet->private);
+	char public[32];
+	ed25519_get_public(public, private);
+	ed25519_sign(transaction->signature, (void*)&transaction->body, sizeof(struct tx_body), public, private);
 }
 FUNCTION int wallet_verify_transaction(uint8_t* public, struct tx *transaction) {
 	return ed25519_verify(transaction->signature, (void*)&transaction->body, sizeof(struct tx_body), public);

@@ -16,10 +16,26 @@ static sqlite3* db;
 static uint64_t _mainchain_length;
 static uint64_t __tx_search_base;
 static uint64_t _altchain_length;
+int _internal_gbcl(void* lengthptr, int argc, char **argv, char **colnames) {
+	if (argc != 1)
+		log_fatal("Failed to query blockchain length");
+	*(uint64_t*)lengthptr = atoll(argv[0]);
+	return 0;
+}
+static uint64_t get_blockchain_length(int is_main_chain) {
+	uint64_t length; char statement[256];
+	sprintf(statement, "select id from blocks where mainchain = %d order by id desc limit 1;", is_main_chain);
+	sqlite3_exec(db, statement, _internal_gbcl, &length, NULL);
+	return length + 1;
+}
 uint64_t get_height() {
+	_mainchain_length = get_blockchain_length(1);
+	_altchain_length = get_blockchain_length(0);
 	return _mainchain_length;
 }
 uint64_t __get_alt_height() {
+	_mainchain_length = get_blockchain_length(1);
+	_altchain_length = get_blockchain_length(0);
 	return _altchain_length;
 }
 int _internal_rdb(void* ptr, int argc, char **argv, char **colnames) {
@@ -31,7 +47,6 @@ int _internal_rdb(void* ptr, int argc, char **argv, char **colnames) {
 	block_decompress(compbuf, len, ptr);
 	return 0;
 }
-void write_block(int is_main_chain, uint64_t id, struct block *block);
 FUNCTION void read_block(int is_main_chain, uint64_t id, struct block *block) {
 	char statement[256];
 	sprintf(statement, "SELECT data FROM blocks WHERE id = %lld;", id);
@@ -40,7 +55,7 @@ FUNCTION void read_block(int is_main_chain, uint64_t id, struct block *block) {
 	locked = 1;
 	if(sqlite3_exec(db, statement, _internal_rdb, block, NULL)) log_fatal("Failed to read block %d.", id);
 	locked = 0;
-
+	IF_DEBUG(print_block(block));
 }
 int transaction_spent(uint8_t* signature) {
 	char sigbuf[128];
@@ -74,13 +89,14 @@ int _internal_gbfa(void *ptr, int argc, char **argv, char **colnames) {
 uint64_t get_balance_for_address(uint8_t* public) {
 	struct block b; char basebuf[64]; uint64_t ret = 0;
 	base32_encode(public, 32, basebuf, 64);
+	IF_DEBUG(printf("getbalance(%s) -> ?\n", basebuf));
 	char statement[384];
 	struct __internal_state_gbfa state = {basebuf, &ret};
 	sprintf(statement, "SELECT amount, xfrom, xto FROM txcache WHERE xfrom = '%s' or xto = '%s';", basebuf, basebuf);
 	if(sqlite3_exec(db, statement, _internal_gbfa, &state, NULL)) { IF_DEBUG(puts(sqlite3_errmsg(db))); }
 	return ret;
 }
-static void update_blockchain_difficulty(int is_main_chain, uint32_t difficulty) {
+void update_blockchain_difficulty(int is_main_chain, uint32_t difficulty) {
 	char statement[256];
 	sprintf(statement, "delete from misc where key = 'difficulty%d'; insert or replace into misc (key, valueint) values('difficulty%d', %ld);", is_main_chain, is_main_chain, difficulty);
 	if (sqlite3_exec(db, statement, NULL, NULL, NULL)) log_fatal("Failed to update blockchain difficulty");
@@ -97,19 +113,6 @@ static uint32_t get_blockchain_difficulty(int is_main_chain) {
 	sqlite3_exec(db, statement, _internal_gbdf, &difficulty, NULL);
 	return difficulty;
 }
-int _internal_gbcl(void* lengthptr, int argc, char **argv, char **colnames) {
-	IF_DEBUG(puts(argv[0]));
-	if (argc != 1)
-		log_fatal("Failed to query blockchain length");
-	*(uint64_t*)lengthptr = atoll(argv[0]);
-	return 0;
-}
-static uint64_t get_blockchain_length(int is_main_chain) {
-	uint64_t length; char statement[256];
-	sprintf(statement, "select id from blocks where mainchain = %d order by id desc limit 1;", is_main_chain);
-	sqlite3_exec(db, statement, _internal_gbcl, &length, NULL);
-	return length + 1;
-}
 #define A(a) if(a) log_fatal(sqlite3_errmsg(db));
 void setup_blockchain() {
 	A(sqlite3_exec(db, "CREATE TABLE blocks (id int, data string, hash string, lasthash string, mainchain int);", NULL, NULL, NULL));
@@ -119,8 +122,8 @@ void setup_blockchain() {
 }
 void switch_chains() {
 	sqlite3_mutex_enter(sqlite3_db_mutex(db));
-	if(sqlite3_exec(db, "DELETE FROM blocks WHERE mainchain = 1; UPDATE blocks SET mainchain = 1 WHERE mainchain = 0;", NULL, NULL, NULL))
-		log_fatal("Failed to switch blockchains. The blockchain is now likely corrupt.");
+	if(sqlite3_exec(db, "BEGIN; DELETE FROM blocks WHERE mainchain = 1; UPDATE blocks SET mainchain = 1 WHERE mainchain = 0; END;", NULL, NULL, NULL))
+		log_fatal("Failed to switch blockchains.");
 	sqlite3_mutex_leave(sqlite3_db_mutex(db));
 }
 FUNCTION void init_blockchain() {
@@ -145,8 +148,8 @@ FUNCTION void write_block(int is_main_chain, uint64_t id, struct block *block) {
 	static int locked = 0;
 	static char blockbuf[256000];
 	static char compblock[70000];
-	int osz;
-	block_compress(block, compblock, osz);
+	int osz = 70000; int failed;
+	if (failed = block_compress(block, compblock, osz)) log_fatal("Failed to compress block: err %d.\n", failed);
 	while (locked);
 	locked = 1;
 	sqlite3_exec(db, "CREATE UNIQUE INDEX idx_blockhash ON blocks (hash);", NULL, NULL, NULL);

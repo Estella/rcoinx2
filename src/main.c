@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include "txpool.h"
 #include "rpc.h"
 #include "block.h"
 #include "chain.h"
@@ -49,6 +50,8 @@ int main(int argc, char **argv) {
 	init_blockchain();
 	log_info("Loading RPC Server...");
 	thrd_create(&rpcserver, init_rpc_server, (void*)my_opts.port);
+	log_info("Loading transaction pool...");
+	txpool_init();
 	log_info("Ready");
 	while (1) {
 		thrd_yield();

@@ -14,7 +14,7 @@ struct remote_wallet {
 	uint64_t padding_64;
 };
 FUNCTION void new_wallet(struct wallet* wallet);
-FUNCTION void wallet_sign_transaction(struct wallet* wallet, struct tx* transaction);
+FUNCTION void wallet_sign_transaction(uint8_t* private, struct tx* transaction);
 FUNCTION int wallet_verify_transaction(uint8_t* public, struct tx *transaction);
 FUNCTION int save_wallet(struct wallet* wallet, char *path);
 FUNCTION int load_wallet(struct wallet* wallet, char *path);
