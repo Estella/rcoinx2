@@ -33,6 +33,12 @@ int main(int argc, char **argv) {
 	if (argc == 2 && (argv[1][1] == 'h' || argv[1][2] == 'h')) {
 		printf("RCOINX/2.0 Block size = %d, transaction size = %d\n", sizeof(struct block), sizeof(struct tx));
 		printf("Usage: rcoind [--option=value]...\n");
+		printf("Options:\n\n");
+		#define OPTION(a,b,c) printf("  --%-20 <%s> %s\n\n", a, b, c);
+		OPTION("datadir", "<path>", "Path to the data directory");
+		OPTION("optimize", "<1|0>", "Optimize database before startup (WARNING: may take a while!)");
+		OPTION("port", "<number>", "Port to listen on for RPC");
+		#undef OPTION
 		return 1;
 	}
 	for (int i = 1; i < argc; i++) {

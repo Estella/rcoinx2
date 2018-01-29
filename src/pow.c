@@ -13,8 +13,9 @@
 FUNCTION uint32_t calc_target(uint32_t last_target, uint64_t time_a, uint64_t time_b) {
 	if (time_a == 0 || time_b == 0) return 1;
 	int32_t difference = (time_a - time_b);
-	if (difference > TARGET_TIME_SEC && last_target == 0) return 1;
-	return last_target + ((TARGET_TIME_SEC * 10) - (difference * 10));
+	if (abs(difference) > TARGET_TIME_SEC && last_target == 0) return 1;
+	int32_t ret = last_target + ((TARGET_TIME_SEC * 10) - (difference * 10));
+	return ret > 0 ? ret : 1;
 }
 FUNCTION int verify_work(uint8_t *hash, uint32_t target) {
 	struct bn a;

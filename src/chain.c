@@ -1,4 +1,5 @@
 #define _CHAIN
+#include "tinycthread.h"
 #include "log.h"
 #include <time.h>
 #include <unistd.h>
@@ -23,10 +24,24 @@ int _internal_gbcl(void* lengthptr, int argc, char **argv, char **colnames) {
 	return 0;
 }
 static uint64_t get_blockchain_length(int is_main_chain) {
-	uint64_t length; char statement[256];
+	uint64_t length = (uint64_t)-1; char statement[256];
 	sprintf(statement, "select id from blocks where mainchain = %d order by id desc limit 1;", is_main_chain);
-	sqlite3_exec(db, statement, _internal_gbcl, &length, NULL);
+	log_assert(0 == sqlite3_exec(db, statement, _internal_gbcl, &length, NULL), sqlite3_errmsg(db));
+	log_assert(length != (uint64_t)-1 || is_main_chain != 1, "Can't get height of main blockchain!");
+	if (length == (uint64_t)-1) length = 0;
 	return length + 1;
+}
+int _internal_gbcb(void* lengthptr, int argc, char **argv, char **colnames) {
+	if (argc != 1)
+		log_fatal("Failed to query blockchain length");
+	*(uint64_t*)lengthptr = atoll(argv[0]);
+	return 0;
+}
+static uint64_t get_blockchain_base(int is_main_chain) {
+	uint64_t length; char statement[256];
+	sprintf(statement, "select id from blocks where mainchain = %d order by id asc limit 1;", is_main_chain);
+	sqlite3_exec(db, statement, _internal_gbcb, &length, NULL);
+	return length;
 }
 uint64_t get_height() {
 	_mainchain_length = get_blockchain_length(1);
@@ -108,22 +123,81 @@ int _internal_gbdf(void* ptr, int argc, char **argv, char **colnames) {
 	return 0;
 }
 static uint32_t get_blockchain_difficulty(int is_main_chain) {
-	uint32_t difficulty; char statement[256];
+	uint32_t difficulty = 1; char statement[256];
 	sprintf(statement, "select valueint from misc where key = 'difficulty%d';", is_main_chain);
 	sqlite3_exec(db, statement, _internal_gbdf, &difficulty, NULL);
 	return difficulty;
 }
-#define A(a) if(a) log_fatal(sqlite3_errmsg(db));
+#define A(a) log_assert(0 == a, sqlite3_errmsg(db));
 void setup_blockchain() {
-	A(sqlite3_exec(db, "CREATE TABLE blocks (id int, data string, hash string, lasthash string, mainchain int);", NULL, NULL, NULL));
+	A(sqlite3_exec(db, "CREATE TABLE blocks (id int, data string, hash string, lasthash string, time int, mainchain int);", NULL, NULL, NULL));
 	A(sqlite3_exec(db, "CREATE TABLE balances (balance int, address string);", NULL, NULL, NULL));
 	A(sqlite3_exec(db, "CREATE TABLE txcache (blockid int, mainchain int, signature string, xfrom string, xto string, amount int);", NULL, NULL, NULL));
 	A(sqlite3_exec(db, "CREATE TABLE misc (key string, valueint int, valuestr string);", NULL, NULL, NULL));
 }
-void switch_chains() {
+#undef A
+static struct _internal_chains {
+	int all_chains[512];
+	uint64_t lastblocktime[512];
+	int is_orphan_block[512];
+	int num_chains;
+} _internal_chains;
+int _internal_cleanup_isorphan(void* result, int argc, char **argv, char **colnames) {
+	log_assert(argc == 1, "What!?");
+	*((int*)result) = 1;
+	return 0;
+}
+int _internal_new_chain_id(void *result, int argc, char **argv, char **colnames) {
+	log_assert(argc == 1, "What!?");
+	*((int*)result) = atoi(argv[0]) + 1;
+	return 0;
+}
+int new_chain_id() {
+	int result = 0;
+	log_assert(0 == sqlite3_exec(db, "SELECT max(mainchain) FROM blocks;", _internal_new_chain_id, &result, NULL), "Failed");
+	return result;
+}
+int chain_is_orphan(int chain_id) {
+	int result = 0; char statement[1024];
+	sprintf(statement, "SELECT id FROM blocks WHERE EXISTS(SELECT * FROM blocks WHERE mainchain = %d AND id = %lld);", chain_id, get_blockchain_base(chain_id) + 1);
+	log_assert(0 == sqlite3_exec(db, statement, _internal_cleanup_isorphan, &result, NULL), "Failed");
+	return result;
+}
+int _internal_cleanup_getchains(void* UNUSED, int argc, char **argv, char **colnames) {
+	log_assert(argc == 2, "What!?");
+	_internal_chains.all_chains[_internal_chains.num_chains++] = atoi(argv[0]);
+	_internal_chains.lastblocktime[_internal_chains.num_chains-1] = atoll(argv[1]);
+	return 0;
+}
+void periodic_cleanup() {
+	// Delete orphan blocks older than 2 minutes and delete alternate chains older than 10 minutes
+	_internal_chains.num_chains = 0;
+	log_assert(0 == sqlite3_exec(db, "SELECT DISTINCT mainchain, time FROM blocks WHERE mainchain <> 1;", _internal_cleanup_getchains, NULL, NULL), sqlite3_errmsg(db));
+	for (int i = 0; i < _internal_chains.num_chains; i++) {
+		int chainid = _internal_chains.all_chains[i];
+		int isorphan = chain_is_orphan(_internal_chains.all_chains[i]);
+		uint64_t lasttime = _internal_chains.lastblocktime[i];
+		char statement[256];
+		if (((time(NULL) - lasttime) > 120 && isorphan) || ((time(NULL) - lasttime) > 600)) {
+			sprintf(statement, "DELETE FROM blocks WHERE mainchain = %d;", chainid);
+			log_assert(0 == sqlite3_exec(db, statement, NULL, NULL, NULL), "Failed to purge forked blockchain");
+		}
+	}
+}
+int cleanup_thread(void* UNUSED) {
+	log_info("Started blockchain cleanup thread...");
+	while (1) {
+		periodic_cleanup();
+		thrd_sleep(&(struct timespec){.tv_sec=120}, NULL);
+	}
+}
+void switch_chains(int new_chain) {
+	log_assert(new_chain != 1, "Can't switch from main chain to main chain!");
 	sqlite3_mutex_enter(sqlite3_db_mutex(db));
-	if(sqlite3_exec(db, "BEGIN; DELETE FROM blocks WHERE mainchain = 1; UPDATE blocks SET mainchain = 1 WHERE mainchain = 0; END;", NULL, NULL, NULL))
-		log_fatal("Failed to switch blockchains.");
+	char statement[1024];
+	sprintf(statement, "BEGIN; DELETE FROM blocks WHERE mainchain = 1 AND id >= %lld; UPDATE blocks SET mainchain = 1 WHERE mainchain = %d; END;", get_blockchain_base(new_chain), new_chain);
+	if(sqlite3_exec(db, statement, NULL, NULL, NULL))
+		log_fatal("Failed to switch blockchains (alternate chain %id to main chain).", new_chain);
 	sqlite3_mutex_leave(sqlite3_db_mutex(db));
 }
 FUNCTION void init_blockchain() {
@@ -142,7 +216,8 @@ FUNCTION void init_blockchain() {
 	_altchain_length = get_blockchain_length(0);
 	last_difficulty = get_blockchain_difficulty(1);
 	last_alt_difficulty = get_blockchain_difficulty(0);
-	printf("Blockchain heights: main = %lld, alt = %lld\n", _mainchain_length, _altchain_length);
+	thrd_t t;
+	thrd_create(&t, cleanup_thread, NULL);
 }
 FUNCTION void write_block(int is_main_chain, uint64_t id, struct block *block) {
 	static int locked = 0;
@@ -153,8 +228,9 @@ FUNCTION void write_block(int is_main_chain, uint64_t id, struct block *block) {
 	while (locked);
 	locked = 1;
 	sqlite3_exec(db, "CREATE UNIQUE INDEX idx_blockhash ON blocks (hash);", NULL, NULL, NULL);
-	int pos = sprintf(blockbuf, "insert or replace into blocks(id, mainchain, data, hash, lasthash) values(%lld, %d, '", id, is_main_chain);
-	IF_DEBUG(printf("compressed size: %d\n", osz));
+	IF_DEBUG(printf("IsMainChain -> %d\n", is_main_chain));
+	int pos = sprintf(blockbuf, "insert or replace into blocks(id, time, mainchain, data, hash, lasthash) values(%lld, %lld, %d, '", id, block->timestamp, is_main_chain);
+	IF_DEBUG(printf("Statement -> %s...);\n", blockbuf));
 	pos += base32_encode(compblock, osz, blockbuf + pos, 256000 - pos);
 	pos += sprintf(blockbuf + pos, "', '");
 	pos += base32_encode(block->hash, 64, blockbuf + pos, 256000 - pos);
@@ -162,7 +238,7 @@ FUNCTION void write_block(int is_main_chain, uint64_t id, struct block *block) {
 	pos += base32_encode(block->lasthash, 64, blockbuf + pos, 256000 - pos);
 	pos += sprintf(blockbuf + pos, "');");
 	//sqlite3_exec(db, "CREATE TABLE txcache (blockid int, mainchain int, signature string, xfrom string, xto string, amount int);", NULL, NULL, NULL);
-	if (sqlite3_exec(db, blockbuf, NULL, NULL, NULL)) log_fatal("Failed to write block %lld to database.", id);
+	if (sqlite3_exec(db, blockbuf, NULL, NULL, NULL)) log_fatal("Failed to write block %lld to database: %s.", id, sqlite3_errmsg(db));
 	locked = 0;
 	char statement[1536];
 	sqlite3_exec(db, "CREATE UNIQUE INDEX idx_txsig ON txcache (signature);", NULL, NULL, NULL);
